@@ -24,9 +24,5 @@ INSERT INTO mined_transactions (tx_hash, block_number, block_hash, transaction_i
 ('0x3c4d5e6f7890abcdef1234567890abcdef1234567890abcdef1234567892', 18500002, '0x123456789abc', 8, 1, '2850000', '5000000000', '2025-10-06 04:31:12.239562+00');
 
 -- Insert analysis metrics
-INSERT INTO analysis_metrics (tx_hash, was_mined, prediction_correct, time_to_mine, actual_gas_used, created_at) VALUES
-('0x1a2b3c4d5e6f7890abcdef1234567890abcdef1234567890abcdef1234567890', true, true, 15.0, '185000', '2025-10-06 04:28:12.239562+00'),
-('0x2b3c4d5e6f7890abcdef1234567890abcdef1234567890abcdef1234567891', true, true, 75.0, '230000', '2025-10-06 04:30:12.239562+00'),
-('0x3c4d5e6f7890abcdef1234567890abcdef1234567890abcdef1234567892', true, true, 75.0, '2850000', '2025-10-06 04:31:12.239562+00'),
-('0x4d5e6f7890abcdef1234567890abcdef1234567890abcdef1234567893', false, NULL, NULL, NULL, '2025-10-06 04:31:57.239562+00'),
-('0x5e6f7890abcdef1234567890abcdef1234567890abcdef1234567894', false, NULL, NULL, NULL, '2025-10-06 04:32:27.239562+00');
+ERROR:  42703: column "time_to_mine" of relation "analysis_metrics" does not exist
+LINE 1: INSERT INTO analysis_metrics (tx_hash, was_mined, prediction_correct, time_to_mine, actual_gas_used, created_at) VALUES
