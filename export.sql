@@ -18,10 +18,10 @@ INSERT INTO transaction_classifications (tx_hash, classification_type, confidenc
 ('0x5e6f7890abcdef1234567890abcdef1234567890abcdef1234567894', 'swap', 0.91, '0x38ed1739', '0x10ed43c718714eb63d5aa57b78b54704e256024e', '{"hasValue":true}', '2025-10-06 04:32:27.239562+00');
 
 -- Insert mined transactions
-INSERT INTO mined_transactions (tx_hash, block_number, block_hash, transaction_index, gas_used, effective_gas_price, status, mined_at) VALUES
-('0x1a2b3c4d5e6f7890abcdef1234567890abcdef1234567890abcdef1234567890', 18500000, '0xabc123def456', 42, '185000', '5000000000', 'success', '2025-10-06 04:28:12.239562+00'),
-('0x2b3c4d5e6f7890abcdef1234567890abcdef1234567890abcdef1234567891', 18500001, '0xdef789abc012', 15, '230000', '5000000000', 'success', '2025-10-06 04:30:12.239562+00'),
-('0x3c4d5e6f7890abcdef1234567890abcdef1234567890abcdef1234567892', 18500002, '0x123456789abc', 8, '2850000', '5000000000', 'success', '2025-10-06 04:31:12.239562+00');
+INSERT INTO mined_transactions (tx_hash, block_number, block_hash, transaction_index, status, gas_used, effective_gas_price, mined_at) VALUES
+('0x1a2b3c4d5e6f7890abcdef1234567890abcdef1234567890abcdef1234567890', 18500000, '0xabc123def456', 42, 1, '185000', '5000000000', '2025-10-06 04:28:12.239562+00'),
+('0x2b3c4d5e6f7890abcdef1234567890abcdef1234567890abcdef1234567891', 18500001, '0xdef789abc012', 15, 1, '230000', '5000000000', '2025-10-06 04:30:12.239562+00'),
+('0x3c4d5e6f7890abcdef1234567890abcdef1234567890abcdef1234567892', 18500002, '0x123456789abc', 8, 1, '2850000', '5000000000', '2025-10-06 04:31:12.239562+00');
 
 -- Insert analysis metrics
 INSERT INTO analysis_metrics (tx_hash, was_mined, prediction_correct, time_to_mine, actual_gas_used, created_at) VALUES
