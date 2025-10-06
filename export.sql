@@ -10,12 +10,12 @@ INSERT INTO pending_transactions (tx_hash, from_address, to_address, value, gas_
 ('0x5e6f7890abcdef1234567890abcdef1234567890abcdef1234567894', '0x4b20993bc481177ec7e8f571cecae8a9e22c02db', '0x10ed43c718714eb63d5aa57b78b54704e256024e', '2000000000000000000', '6000000000', NULL, NULL, '200000', '0x38ed1739', 1, '2025-10-06 04:32:27.239562+00');
 
 -- Insert transaction classifications
-INSERT INTO transaction_classifications (tx_hash, classification_type, confidence, features, classified_at) VALUES
-('0x1a2b3c4d5e6f7890abcdef1234567890abcdef1234567890abcdef1234567890', 'swap', 0.95, '{"method":"swap","hasValue":true,"gasLimit":"high"}', '2025-10-06 04:27:57.239562+00'),
-('0x2b3c4d5e6f7890abcdef1234567890abcdef1234567890abcdef1234567891', 'add_liquidity', 0.88, '{"method":"addLiquidity","hasValue":true}', '2025-10-06 04:29:57.239562+00'),
-('0x3c4d5e6f7890abcdef1234567890abcdef1234567890abcdef1234567892', 'contract_deploy', 0.99, '{"toAddress":null,"gasLimit":"very_high"}', '2025-10-06 04:30:57.239562+00'),
-('0x4d5e6f7890abcdef1234567890abcdef1234567890abcdef1234567893', 'token_transfer', 0.92, '{"method":"transfer","tokenContract":"WBNB"}', '2025-10-06 04:31:57.239562+00'),
-('0x5e6f7890abcdef1234567890abcdef1234567890abcdef1234567894', 'swap', 0.91, '{"method":"swap","hasValue":true}', '2025-10-06 04:32:27.239562+00');
+INSERT INTO transaction_classifications (tx_hash, classification_type, confidence, method_signature, router_address, metadata, classified_at) VALUES
+('0x1a2b3c4d5e6f7890abcdef1234567890abcdef1234567890abcdef1234567890', 'swap', 0.95, '0x38ed1739', '0x10ed43c718714eb63d5aa57b78b54704e256024e', '{"hasValue":true,"gasLimit":"high"}', '2025-10-06 04:27:57.239562+00'),
+('0x2b3c4d5e6f7890abcdef1234567890abcdef1234567890abcdef1234567891', 'add_liquidity', 0.88, '0xe8e33700', '0x10ed43c718714eb63d5aa57b78b54704e256024e', '{"hasValue":true}', '2025-10-06 04:29:57.239562+00'),
+('0x3c4d5e6f7890abcdef1234567890abcdef1234567890abcdef1234567892', 'contract_deploy', 0.99, '0x60806040', NULL, '{"gasLimit":"very_high"}', '2025-10-06 04:30:57.239562+00'),
+('0x4d5e6f7890abcdef1234567890abcdef1234567890abcdef1234567893', 'token_transfer', 0.92, '0xa9059cbb', '0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c', '{"tokenContract":"WBNB"}', '2025-10-06 04:31:57.239562+00'),
+('0x5e6f7890abcdef1234567890abcdef1234567890abcdef1234567894', 'swap', 0.91, '0x38ed1739', '0x10ed43c718714eb63d5aa57b78b54704e256024e', '{"hasValue":true}', '2025-10-06 04:32:27.239562+00');
 
 -- Insert mined transactions
 INSERT INTO mined_transactions (tx_hash, block_number, block_hash, transaction_index, gas_used, effective_gas_price, status, mined_at) VALUES
