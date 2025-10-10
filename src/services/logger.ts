@@ -21,7 +21,7 @@ class Logger {
       level,
       message,
       context: this.context,
-      ...(data && { data }),
+    ...(data !== undefined ? { data } : {}),
     };
 
     const formattedMessage = `[${entry.timestamp}] [${level.toUpperCase()}] [${this.context}] ${message}`;

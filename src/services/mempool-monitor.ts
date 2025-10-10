@@ -30,12 +30,12 @@ export class MempoolMonitor {
   }
 
   private setupProviderListeners() {
-    this.provider.websocket.on('error', (error) => {
-      logger.error('WebSocket error', { error: error.message });
+      this.provider.on('error', (error) => {
+      logger.error('WebSocket error', { error: (error as Error).message });
       this.handleReconnect();
     });
 
-    this.provider.websocket.on('close', () => {
+    this.provider.on('close', () => {
       logger.warn('WebSocket connection closed');
       if (this.isRunning) {
         this.handleReconnect();

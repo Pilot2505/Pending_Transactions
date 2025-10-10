@@ -60,7 +60,7 @@ It uses heuristic analysis to classify transactions based on method signatures, 
 1. Clone the repository:
 ```bash
 git clone <repository-url>
-cd mempool-monitor
+cd services
 ```
 
 2. Install dependencies:
