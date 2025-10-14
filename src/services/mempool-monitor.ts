@@ -12,36 +12,54 @@ export interface MempoolConfig {
   hotTransactionThreshold?: number;
 }
 
-export class MempoolMonitor {
-  private provider: ethers.WebSocketProvider;
-  private classifier: TransactionClassifier;
-  private config: MempoolConfig;
-  private isRunning = false;
-  private reconnectAttempts = 0;
-  private maxReconnectAttempts = 10;
-  private reconnectDelay = 5000;
-  private pendingTxCache = new Map<string, number>();
-
-  constructor(config: MempoolConfig) {
-    this.config = config;
-    this.provider = new ethers.WebSocketProvider(config.wsUrl);
-    this.classifier = new TransactionClassifier();
-    this.setupProviderListeners();
+async function retry<T>(fn: () => Promise<T>, attempts = 3, delayMs = 500): Promise<T | null> {
+  for (let i = 0; i < attempts; i++) {
+    try {
+      const result = await fn();
+      if (result) return result;
+    } catch {}
+    await new Promise(res => setTimeout(res, delayMs));
   }
+  return null;
+}
+
+export class MempoolMonitor {
+private provider!: ethers.WebSocketProvider;
+private classifier!: TransactionClassifier;
+private config!: MempoolConfig;
+private isRunning = false;
+private reconnectAttempts = 0;
+private maxReconnectAttempts = 10;
+private reconnectDelay = 5000;
+private pendingTxCache = new Map<string, number>();
+
+constructor(config: MempoolConfig) {
+  this.config = config;
+  this.classifier = new TransactionClassifier();
+  // Provider will be initialized in start()
+}
 
   private setupProviderListeners() {
-      this.provider.on('error', (error) => {
+    this.provider.on('error', (error) => {
       logger.error('WebSocket error', { error: (error as Error).message });
       this.handleReconnect();
     });
 
-    this.provider.on('close', () => {
-      logger.warn('WebSocket connection closed');
-      if (this.isRunning) {
-        this.handleReconnect();
-      }
-    });
+    const wsProvider = this.provider as any;
+    const rawSocket = wsProvider._websocket || wsProvider.websocket || null;
+
+    if (rawSocket && rawSocket.on) {
+      rawSocket.on('close', () => {
+        logger.warn('WebSocket connection closed');
+        if (this.isRunning) {
+          this.handleReconnect();
+        }
+      });
+    } else {
+      logger.warn('No raw websocket available for close event');
+    }
   }
+
 
   private async handleReconnect() {
     if (this.reconnectAttempts >= this.maxReconnectAttempts) {
@@ -58,9 +76,9 @@ export class MempoolMonitor {
     await new Promise(resolve => setTimeout(resolve, delay));
 
     try {
-      this.provider = new ethers.WebSocketProvider(this.config.wsUrl);
-      this.setupProviderListeners();
+
       await this.start();
+
       this.reconnectAttempts = 0;
       logger.info('Reconnected successfully');
     } catch (error) {
@@ -69,17 +87,26 @@ export class MempoolMonitor {
     }
   }
 
-  async start() {
+
+  async start() { 
     if (this.isRunning) {
       logger.warn('Monitor already running');
       return;
     }
 
     this.isRunning = true;
+
     logger.info('Starting mempool monitor', {
       wsUrl: this.config.wsUrl,
       threshold: this.config.hotTransactionThreshold,
     });
+
+    // ✅ Create the provider here instead of the constructor
+    this.provider = new ethers.WebSocketProvider(this.config.wsUrl);
+
+
+    // ✅ Set up listeners on the fresh provider
+    this.setupProviderListeners();
 
     this.provider.on('pending', async (txHash) => {
       try {
@@ -95,64 +122,82 @@ export class MempoolMonitor {
     this.startBlockMonitor();
   }
 
+
   private async handlePendingTransaction(txHash: string) {
     if (this.pendingTxCache.has(txHash)) {
+      logger.debug('Transaction already in cache', { txHash });
       return;
     }
-
     this.pendingTxCache.set(txHash, Date.now());
 
     try {
-      const tx = await this.provider.getTransaction(txHash);
+      // Retry more aggressively for pending tx
+      let tx = await retry(() => this.provider.getTransaction(txHash), 10, 300);
 
       if (!tx) {
-        logger.debug('Transaction not found', { txHash });
+        logger.warn('Transaction not found', { txHash });
         return;
       }
 
       const detectedAt = new Date().toISOString();
 
+      // Upsert pending transaction
       const pendingTx: PendingTransaction = {
         tx_hash: tx.hash,
-        from_address: tx.from.toLowerCase(),
+        from_address: (tx.from ?? '0x0').toLowerCase(),
         to_address: tx.to?.toLowerCase() || null,
-        value: tx.value.toString(),
+        value: tx.value?.toString() || '0',
         gas_price: tx.gasPrice?.toString() || null,
         max_fee_per_gas: tx.maxFeePerGas?.toString() || null,
         max_priority_fee_per_gas: tx.maxPriorityFeePerGas?.toString() || null,
-        gas_limit: tx.gasLimit.toString(),
-        input_data: tx.data,
-        nonce: tx.nonce,
+        gas_limit: tx.gasLimit?.toString() || '0',
+        input_data: tx.data || '0x',
+        nonce: tx.nonce ?? 0,
         detected_at: detectedAt,
       };
 
       const { error: insertError } = await supabase
         .from('pending_transactions')
-        .insert(pendingTx);
+        .upsert(pendingTx, { onConflict: 'tx_hash' });
 
       if (insertError) {
-        if (!insertError.message.includes('duplicate')) {
-          logger.error('Error inserting pending transaction', {
-            txHash,
-            error: insertError.message,
-          });
-        }
-        return;
+        logger.error('Failed to insert pending transaction', { txHash, error: insertError.message });
       }
 
-      const classification = this.classifier.classifyTransaction(tx.to, tx.data);
-      const hotScore = this.classifier.getHotTransactionScore(classification);
+      // Classification
+      const classification = this.classifier?.classifyTransaction?.(tx.to, tx.data) || {
+        type: 'unknown',
+        confidence: 0,
+        methodSignature: null,
+        routerAddress: null,
+        tokensInvolved: [],
+        metadata: {},
+      };
 
-      if (hotScore >= (this.config.hotTransactionThreshold || 7)) {
+      // Always log classification and score
+      const hotScore = this.classifier?.getHotTransactionScore?.(classification) || 0;
+      logger.debug('Hot score calculated', { txHash: tx.hash, score: hotScore, classification });
+      logger.info('Transaction classified', {
+        txHash,
+        type: classification.type,
+        confidence: classification.confidence,
+        router: classification.routerAddress,
+        tokens: classification.tokensInvolved,
+        score: hotScore,
+        threshold: this.config.hotTransactionThreshold || 0.1,
+      });
+
+      if (hotScore >= (this.config.hotTransactionThreshold || 0.1)) {
         logger.info('HOT transaction detected', {
           txHash,
           type: classification.type,
           confidence: classification.confidence,
           score: hotScore,
-          router: classification.metadata.router,
+          router: classification.routerAddress,
         });
       }
 
+      // Upsert classification
       const txClassification: TransactionClassification = {
         tx_hash: tx.hash,
         classification_type: classification.type,
@@ -166,25 +211,21 @@ export class MempoolMonitor {
 
       const { error: classError } = await supabase
         .from('transaction_classifications')
-        .insert(txClassification);
+        .upsert(txClassification, { onConflict: 'tx_hash' });
 
-      if (classError && !classError.message.includes('duplicate')) {
-        logger.error('Error inserting classification', {
-          txHash,
-          error: classError.message,
-        });
+      if (classError) {
+        logger.error('Failed to insert transaction classification', { txHash, error: classError.message });
       }
-    } catch (error) {
-      if (error instanceof Error && error.message.includes('transaction not found')) {
-        return;
+
+    } catch (err: any) {
+      if (err?.code !== -32000 && !String(err.message).includes('transaction not found')) {
+        logger.error('Error handling pending transaction', { txHash, error: err.message || err });
       }
-      throw error;
     } finally {
-      setTimeout(() => {
-        this.pendingTxCache.delete(txHash);
-      }, 300000);
+      setTimeout(() => this.pendingTxCache.delete(txHash), 300000); // 5 min cache
     }
   }
+
 
   private startBlockMonitor() {
     this.provider.on('block', async (blockNumber) => {
@@ -201,45 +242,69 @@ export class MempoolMonitor {
     logger.info('Block monitor started');
   }
 
-  private async analyzeBlock(blockNumber: number) {
-    logger.debug('Analyzing block', { blockNumber });
+    private async analyzeBlock(blockNumber: number) {
+      logger.info('Analyzing block', { blockNumber });
+      try {
+        const block = await retry(() => this.provider.getBlock(blockNumber, true), 5, 500);
 
-    try {
-      const block = await this.provider.getBlock(blockNumber, true);
+        if (!block || !block.transactions || block.transactions.length === 0) {
+          return;
+        }
 
-      if (!block || !block.transactions || block.transactions.length === 0) {
-        return;
-      }
-
-      const blockMinedAt = new Date(block.timestamp * 1000).toISOString();
+        const blockMinedAt = new Date(block.timestamp * 1000).toISOString();
 
       for (const txData of block.transactions) {
-        if (typeof txData === 'string') continue;
+        let tx: ethers.TransactionResponse | null = null;
 
-        const tx = txData as ethers.TransactionResponse;
-        const receipt = await this.provider.getTransactionReceipt(tx.hash);
+        if (typeof txData === 'string') {
+          tx = await this.provider.getTransaction(txData);
+        } else {
+          tx = txData as ethers.TransactionResponse;
+        }
 
+        if (!tx) continue;
+
+        const receipt = await retry(() => this.provider.getTransactionReceipt(tx.hash), 5, 500);
         if (!receipt) continue;
 
+        const classification = this.classifier?.classifyTransaction?.(tx.to, tx.data) || {
+          type: 'unknown',
+          confidence: 0,
+          methodSignature: null,
+          routerAddress: null,
+          tokensInvolved: [],
+          metadata: {},
+        };
+
+        const hotScore = this.classifier?.getHotTransactionScore?.(classification) || 0;
+
+        if (hotScore >= (this.config.hotTransactionThreshold || 0.1)) {
+          logger.info('HOT transaction detected (from block)', {
+            txHash: tx.hash,
+            type: classification.type,
+            confidence: classification.confidence,
+            score: hotScore,
+            router: classification.routerAddress,
+          });
+        }
+      
         const minedTx = {
           tx_hash: tx.hash,
           block_number: blockNumber,
           block_hash: block.hash || '',
-          transaction_index: receipt.index,
-          status: receipt.status || 0,
-          gas_used: receipt.gasUsed.toString(),
-          effective_gas_price: receipt.gasPrice.toString(),
+          transaction_index: (receipt as any).transactionIndex ?? 0,  // fallback
+          status: receipt.status ?? 0,
+          gas_used: receipt.gasUsed?.toString() || '0', 
+          effective_gas_price: (receipt as any).effectiveGasPrice?.toString() || '0',
           mined_at: blockMinedAt,
-          logs: receipt.logs.map(log => ({
+          logs: receipt.logs?.map((log: any) => ({
             address: log.address,
             topics: log.topics,
             data: log.data,
-          })),
+          })) || [],
         };
 
-        const { error } = await supabase
-          .from('mined_transactions')
-          .insert(minedTx);
+        const { error } = await supabase.from('mined_transactions').insert([minedTx]);
 
         if (error && !error.message.includes('duplicate')) {
           logger.error('Error inserting mined transaction', {
@@ -249,15 +314,26 @@ export class MempoolMonitor {
           continue;
         }
 
-        await this.calculateMetrics(tx.hash, blockMinedAt);
+        try {
+          await this.calculateMetrics(tx.hash, blockMinedAt);
+        } catch (metricErr) {
+          logger.error('Error calculating metrics', { txHash: tx.hash, error: metricErr });
+        }
       }
-    } catch (error) {
-      logger.error('Block analysis failed', {
-        blockNumber,
-        error: error instanceof Error ? error.message : error,
-      });
+    } catch (err: any) {
+      // ✅ Only log unexpected errors, skip the known "not found" / -32000
+      if (
+        err?.code !== -32000 &&
+        !String(err.message).includes('not found')
+      ) {
+        logger.error('Block analysis failed', {
+          blockNumber,
+          error: err.message || err,
+        });
+      }
     }
   }
+
 
   private async calculateMetrics(txHash: string, minedAt: string) {
     const { data: pendingTx } = await supabase
@@ -273,6 +349,7 @@ export class MempoolMonitor {
       .maybeSingle();
 
     if (!pendingTx || !classification) {
+      logger.warn('Cannot calculate metrics, missing data', { txHash });
       return;
     }
 
@@ -286,12 +363,14 @@ export class MempoolMonitor {
       .eq('tx_hash', txHash)
       .maybeSingle();
 
-    let actualType = 'unknown';
-    if (minedTx && minedTx.status === 1) {
-      actualType = this.inferActualType(minedTx.logs, classification.classification_type);
+    if (!minedTx) {
+      logger.warn('Cannot calculate metrics, mined transaction missing', { txHash });
+      return;
     }
 
-    const predictionCorrect = actualType === classification.classification_type;
+    const actualType = minedTx.status === 1
+      ? this.inferActualType(minedTx.logs, classification.classification_type)
+      : 'unknown';
 
     const metric = {
       tx_hash: txHash,
@@ -299,20 +378,18 @@ export class MempoolMonitor {
       actual_type: actualType,
       was_mined: true,
       latency_ms: latencyMs,
-      prediction_correct: predictionCorrect,
+      prediction_correct: actualType === classification.classification_type,
       mempool_time_ms: latencyMs,
       analyzed_at: new Date().toISOString(),
     };
 
-    await supabase.from('analysis_metrics').insert(metric);
+    const { error: metricError } = await supabase.from('analysis_metrics').insert(metric);
 
-    logger.debug('Metrics calculated', {
-      txHash,
-      latencyMs,
-      predicted: classification.classification_type,
-      actual: actualType,
-      correct: predictionCorrect,
-    });
+    if (metricError) {
+      logger.error('Failed to insert analysis metric', { txHash, error: metricError.message });
+    } else {
+      logger.debug('Metrics inserted successfully', { txHash, latencyMs, predicted: classification.classification_type, actual: actualType });
+    }
   }
 
   private inferActualType(logs: unknown[], predictedType: string): string {
@@ -338,7 +415,12 @@ export class MempoolMonitor {
   async stop() {
     this.isRunning = false;
     this.provider.removeAllListeners();
-    await this.provider.destroy();
+    // Close the underlying websocket connection
+    if ((this.provider as any)._websocket?.terminate) {
+      (this.provider as any)._websocket.terminate();
+    } else if ((this.provider as any)._websocket?.close) {
+      (this.provider as any)._websocket.close();
+    }
     logger.info('Mempool monitor stopped');
   }
 

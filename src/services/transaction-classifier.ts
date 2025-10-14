@@ -174,8 +174,8 @@ export class TransactionClassifier {
       token_approval: 1,
       unknown: 0,
     };
-
-    const baseScore = typeScores[classification.type] || 0;
+    const typeKey = classification.type?.toLowerCase().replace(/\s+/g, '_') || 'unknown';
+    const baseScore = typeScores[typeKey] || 0;
     const confidenceMultiplier = classification.confidence;
     const routerBonus = classification.routerAddress ? 1.5 : 1.0;
 
